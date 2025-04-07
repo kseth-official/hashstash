@@ -16,6 +16,19 @@ const (
 	LogCommittingEntriesAppendEntries
 	LogHeartbeat
 	LogSyncLogEntries
+
+	// From lab4c_ksethapp
+	LogTerm
+	LogVote
+	LogCandidate
+	LogTimer
+	LogLeader
+	LogEntryAdded
+	LogEncodingError
+	LogDecodingError
+	LogPersist
+	LogReadPersist
+	// TODO: Add more log types here
 )
 
 const (
@@ -37,6 +50,19 @@ var RaftLoggingMap = map[int]string{
 	LogCommittingEntriesAppendEntries:  "CommittingEntriesAppendEntriesEvent",
 	LogHeartbeat:                       "HeartbeatEvent",
 	LogSyncLogEntries:                  "SyncLogEntriesEvent",
+
+	// From lab4c_ksethapp
+	LogTerm:          "RaftTermEvent",
+	LogVote:          "RaftVoteEvent",
+	LogCandidate:     "RaftCandidateEvent",
+	LogTimer:         "RaftTimerEvent",
+	LogLeader:        "RaftLeaderEvent",
+	LogEntryAdded:    "LogEntryAddedEvent",
+	LogEncodingError: "LogEncodingErrorEvent",
+	LogDecodingError: "LogDecodingErrorEvent",
+	LogPersist:       "LogPersistEvent",
+	LogReadPersist:   "LogReadPersistEvent",
+	// TODO: Add more log types here
 }
 
 var ClerkLoggingMap = map[int]string{
