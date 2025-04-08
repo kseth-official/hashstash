@@ -3,6 +3,7 @@ package kvraft
 import (
 	"lab5/labgob"
 	"lab5/labrpc"
+	"lab5/logger"
 	"lab5/raft"
 	"sync"
 	"sync/atomic"
@@ -65,14 +66,16 @@ func (kv *KVServer) killed() bool {
 // StartKVServer() must return quickly, so it should start goroutines
 // for any long-running work.
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
-	logger := Logger(me)
+	// Commenting out per Piazza @432
+	//logger := logger.Logger(me)
+
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
 
 	kv := new(KVServer)
 	kv.me = me
-	kv.maxraftstate = maxraftstate
+	//kv.maxraftstate = maxraftstate
 
 	// You may need initialization code here.
 

@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"lab5/constants"
 	"lab5/labrpc"
+	"lab5/logger"
 	"math/big"
 )
 
@@ -24,7 +25,6 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
 	// You'll have to add code here.
-	ck.logger = NewLogger(ck.clerkId, true, "Clerk", constants.KvLoggingMap)
 
 	return ck
 }
@@ -55,6 +55,14 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 	// You will have to modify this function.
+}
+
+/*
+Abstraction to send the PutAppend request and receive the reply by reference.
+*/
+func (ck *Clerk) sendPutAppend(server int, args *PutAppendArgs, reply *PutAppendReply) bool {
+	ok := ck.servers[server].Call(PutAppend, &args, &reply)
+	return ok
 }
 
 func (ck *Clerk) Put(key string, value string) {
