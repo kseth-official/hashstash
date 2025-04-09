@@ -8,6 +8,7 @@ import (
 	"math/big"
 )
 
+const ClerkIdMax int64 = int64(1) << 62
 /*
 MAGIC STRINGS FOR RPC CALLS
 */
