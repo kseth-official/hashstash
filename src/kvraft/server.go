@@ -19,10 +19,24 @@ const (
 	PutOp
 	AppendOp
 )
+
+/*
+Represents an operation that is appended to the raft log.
+*/
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	// Operation type: 0 => Get, 1 => Put, 2 => Append
+	Type uint8
+
+	// Key for the operation
+	Key string
+
+	// Value (empty for Get)
+	Val string
+
+	// Client ID and sequence number for duplicate detection
+	ClerkId int64
+	SeqNum  int64
+}
 }
 
 type KVServer struct {
