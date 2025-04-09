@@ -64,8 +64,19 @@ type KVServer struct {
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
 
-	logger *Logger
-	// Your definitions here.
+	logger *logger.Logger
+
+	// Key-value store
+	kvStore map[string]string
+
+	// Duplicate table maps from clerkId to the latest processed request
+	dupTable map[int64]*RequestInfo
+
+	// Channels to notify client handlers waiting for operation completion
+	notifyChs map[int]NotifyChannel
+
+	// Highest index in the log that has been applied
+	lastApplied int
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
