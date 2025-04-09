@@ -356,23 +356,26 @@ func (kv *KVServer) killed() bool {
 // StartKVServer() must return quickly, so it should start goroutines
 // for any long-running work.
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
-	// Commenting out per Piazza @432
-	//logger := logger.Logger(me)
-
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
 
 	kv := new(KVServer)
 	kv.me = me
-	//kv.maxraftstate = maxraftstate
+	// Initialize logger
+	kv.logger = logger.NewLogger(me, false, "KVServer", constants.ClerkLoggingMap)
 
-	// You may need initialization code here.
+	// Initialize state
+	kv.kvStore = make(map[string]string)
+	kv.dupTable = make(map[int64]*RequestInfo)
+	kv.notifyChs = make(map[int]NotifyChannel)
+	kv.lastApplied = 0
 
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
-	// You may need initialization code here.
+	// Start background goroutine to apply committed log entries
+	go kv.applyLogs()
 
 	return kv
 }
