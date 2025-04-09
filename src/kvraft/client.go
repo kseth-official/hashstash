@@ -8,6 +8,13 @@ import (
 	"math/big"
 )
 
+/*
+MAGIC STRINGS FOR RPC CALLS
+*/
+const (
+	GetRPC       = "KVServer.Get"
+	PutAppendRPC = "KVServer.PutAppend"
+)
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	logger  *Logger
