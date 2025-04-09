@@ -19,7 +19,6 @@ package raft
 
 import (
 	"bytes"
-	//	"bytes"
 	"fmt"
 	"lab5/labgob"
 	"math/rand"
@@ -122,11 +121,9 @@ func (rf *Raft) GetState() (int, bool) {
 // after you've implemented snapshots, pass the current snapshot
 // (or nil if there's not yet a snapshot).
 func (rf *Raft) persist() {
+	// Modified to assume caller already holds lock
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 
 	errEncodeCurrentTerm := e.Encode(rf.currentTerm)
 	if errEncodeCurrentTerm != nil {
@@ -222,8 +219,6 @@ Server side handler of call made by sendRequestVote.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (4B).
 	rf.mu.Lock()
-	defer rf.persist()
-	//defer rf.logger.Log(constants.LogPersist, "Persisting after RequestVote") // commenting out since it's verbose
 	defer rf.mu.Unlock()
 
 	reply.Term = rf.currentTerm
@@ -242,6 +237,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.state = Follower
 		rf.votedFor = -1
 		rf.lastHeartbeatTime = time.Now() // Resetting timeout on higher term
+		rf.persist()                      // Persist state changes immediately
 	}
 
 	// Is votedFor null or candidateId?
@@ -249,7 +245,10 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// Check if candidate's log is at least as up-to-date as our log
 	lastLogIndex := len(rf.log) - 1
-	lastLogTerm := rf.log[lastLogIndex].Term
+	lastLogTerm := 0
+	if lastLogIndex >= 0 {
+		lastLogTerm = rf.log[lastLogIndex].Term
+	}
 
 	isLogUpToDate := false
 
@@ -268,6 +267,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// Reset election timeout when granting vote
 		rf.lastHeartbeatTime = time.Now()
 		rf.logger.Log(constants.LogVote, "Granting vote to candidate %d for term %d", args.CandidateId, args.Term)
+		rf.persist() // Persist state after granting vote
 	}
 }
 
@@ -276,8 +276,6 @@ Server side handler of call made by sendAppendEntries.
 */
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
-	defer rf.persist()
-	//defer rf.logger.Log(constants.LogPersist, "Persisting after AppendEntries") // commenting out since it's verbose
 	defer rf.mu.Unlock()
 
 	reply.Term = rf.currentTerm
@@ -297,6 +295,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.currentTerm = args.Term
 		rf.state = Follower
 		rf.votedFor = -1
+		rf.persist()                      // Persist state changes immediately
 		rf.lastHeartbeatTime = time.Now() // Resetting timeout on higher term
 	}
 
@@ -304,6 +303,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.state == Candidate && args.Term >= rf.currentTerm {
 		rf.logger.Log(constants.LogCandidate, "Discovered valid leader %d for term %d, converting to follower", args.LeaderId, args.Term)
 		rf.state = Follower
+		rf.persist() // Persist state after changing role
 	}
 
 	// Reply false if log doesn't contain an entry at prevLogIndex whose term matches prevLogTerm
@@ -335,31 +335,25 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// At this point logs match at prevLogIndex
 
-	// Handle new entries
+	// Improved handling of new entries
 	if len(args.Entries) > 0 {
-		// Find the first conflicting entry and truncate log
-		newEntries := make([]LogEntry, 0)
-		for i, entry := range args.Entries {
+		i := 0
+		for ; i < len(args.Entries); i++ {
 			logIndex := args.PrevLogIndex + 1 + i
-
 			if logIndex >= len(rf.log) {
-				// Append all remaining entries
-				newEntries = append(newEntries, args.Entries[i:]...)
-				break
+				break // Reached end of follower's log, will append remaining entries
 			}
-
-			if rf.log[logIndex].Term != entry.Term {
-				// Conflict found, truncate log and append new entries
+			if rf.log[logIndex].Term != args.Entries[i].Term {
+				// Found conflict, truncate log from here
 				rf.log = rf.log[:logIndex]
-				newEntries = append(newEntries, args.Entries[i:]...)
 				break
 			}
 		}
-
-		// Append any new entries to log
-		if len(newEntries) > 0 {
-			rf.log = append(rf.log, newEntries...)
+		// Append any new entries (either all entries starting from conflict point or all entries from end of log)
+		if i < len(args.Entries) {
+			rf.log = append(rf.log, args.Entries[i:]...)
 			rf.logger.Log(constants.LogEntryAdded, "Appended Entries. Peer ID: %d, New Log: %+v", rf.me, rf.log)
+			rf.persist() // Persist after modifying log
 		}
 	}
 
@@ -503,11 +497,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.logger.Log(constants.LogEntryAdded, "Leader appended entry. Index: %d, Term: %d, Log: %+v",
 		index, rf.currentTerm, rf.log)
 
-	// Temporarily Unlock Because Persist Tries To Lock Anyway
-	rf.mu.Unlock()
+	// Persist the state change immediately
 	rf.persist()
-	rf.logger.Log(constants.LogPersist, "Leader appended entry to log. Persisting.")
-	rf.mu.Lock()
+	rf.logger.Log(constants.LogPersist, "Leader appended entry to log. Persisted.")
 
 	// Start agreement on this new entry
 	go rf.broadcastAppendEntries()
@@ -609,10 +601,12 @@ func (rf *Raft) sendLogEntriesToPeer(peer int) {
 			// If AppendEntries failed
 			if reply.Term > rf.currentTerm {
 				// We're out of date - become follower
+				rf.logger.Log(constants.LogTerm, "Discovered higher term %d from peer %d, converting to follower", reply.Term, peer)
 				rf.currentTerm = reply.Term
 				rf.state = Follower
 				rf.votedFor = -1
 				rf.lastHeartbeatTime = time.Now()
+				rf.persist() // Immediately persist state changes
 			} else {
 				// Optimize log inconsistency resolution based on reply info
 				if reply.XTerm == -1 {
@@ -654,10 +648,11 @@ func (rf *Raft) sendLogEntriesToPeer(peer int) {
 
 /*
 Update the commit index based on matchIndex values.
+Improved to find the highest index that can be committed.
 */
 func (rf *Raft) updateCommitIndex() {
-	// Find the highest index that has been replicated to a majority
-	for n := rf.commitIndex + 1; n < len(rf.log); n++ {
+	// Iterate backward to find the highest index that can be committed
+	for n := len(rf.log) - 1; n > rf.commitIndex; n-- {
 		// Only commit entries from current term
 		if rf.log[n].Term != rf.currentTerm {
 			continue
@@ -676,9 +671,7 @@ func (rf *Raft) updateCommitIndex() {
 			rf.commitIndex = n
 			rf.logger.Log(constants.LogEntryAdded, "Leader committed entry at index %d", n)
 			rf.signalApplier() // Signal that there are new commits to apply
-		} else {
-			// No need to check higher indices if we don't have majority for this one
-			break
+			break              // Found highest index that can be committed
 		}
 	}
 }
@@ -691,7 +684,8 @@ func (rf *Raft) ticker() {
 		rf.mu.Lock()
 
 		// Check if election timeout has elapsed
-		ms := 300 + (rand.Int63() % 300)
+		// Increased randomization range for better stability
+		ms := 400 + (rand.Int63() % 400)
 		electionTimeout := time.Duration(ms) * time.Millisecond
 		timeoutElapsed := time.Since(rf.lastHeartbeatTime) > electionTimeout
 
@@ -703,6 +697,7 @@ func (rf *Raft) ticker() {
 				rf.currentTerm++                  // Increment term
 				rf.votedFor = rf.me               // Vote for self
 				rf.lastHeartbeatTime = time.Now() // Reset timeout
+				rf.persist()                      // Persist state changes immediately
 
 				// Send Requestvote RPCs to all peers
 				go rf.startElection(rf.currentTerm)
@@ -712,6 +707,7 @@ func (rf *Raft) ticker() {
 				rf.currentTerm++                  // Increment term
 				rf.votedFor = rf.me               // Vote for self
 				rf.lastHeartbeatTime = time.Now() // Reset timeout
+				rf.persist()                      // Persist state changes immediately
 
 				// Send Requestvote RPCs to all peers
 				go rf.startElection(rf.currentTerm)
@@ -742,7 +738,10 @@ func (rf *Raft) startElection(term int) {
 
 	// Prepare RequestVote args
 	lastLogIndex := len(rf.log) - 1
-	lastLogTerm := rf.log[lastLogIndex].Term
+	lastLogTerm := 0
+	if lastLogIndex >= 0 {
+		lastLogTerm = rf.log[lastLogIndex].Term
+	}
 
 	args := RequestVoteArgs{
 		Term:         rf.currentTerm,
@@ -780,6 +779,7 @@ func (rf *Raft) startElection(term int) {
 					rf.currentTerm = reply.Term
 					rf.state = Follower
 					rf.votedFor = -1
+					rf.persist() // Immediately persist state changes
 					rf.lastHeartbeatTime = time.Now()
 					return
 				}
@@ -825,6 +825,9 @@ func (rf *Raft) becomeLeader() {
 	// Update leader's own matchIndex
 	rf.matchIndex[rf.me] = len(rf.log) - 1
 
+	// Persist state after becoming leader
+	rf.persist()
+
 	// Start the heartbeat process
 	go rf.sendHeartbeats()
 }
@@ -838,8 +841,8 @@ func (rf *Raft) sendHeartbeats() {
 		rf.broadcastAppendEntries()
 
 		// Sleep for a while before sending next heartbeat
-		// Use a shorter heartbeat interval to ensure stability
-		time.Sleep(50 * time.Millisecond)
+		// Increased heartbeat interval for better stability
+		time.Sleep(100 * time.Millisecond)
 
 		// Check if we're still the leader
 		rf.mu.Lock()
