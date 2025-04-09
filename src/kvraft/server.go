@@ -79,6 +79,13 @@ type KVServer struct {
 	lastApplied int
 }
 
+/*
+Type used as value in the duplicate table.
+*/
+type RequestInfo struct {
+	SeqNum int64
+	Value  string
+}
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
 }
