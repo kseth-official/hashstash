@@ -150,15 +150,48 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
-}
+	// Increment sequence number for this request
+	ck.seqNum++
+	currentSeqNum := ck.seqNum
 
-/*
-Abstraction to send the PutAppend request and receive the reply by reference.
-*/
-func (ck *Clerk) sendPutAppend(server int, args *PutAppendArgs, reply *PutAppendReply) bool {
-	ok := ck.servers[server].Call(PutAppend, &args, &reply)
-	return ok
+	args := PutAppendArgs{
+		Key:     key,
+		Value:   value,
+		Op:      op,
+		ClerkId: ck.clerkId,
+		SeqNum:  currentSeqNum,
+	}
+
+	ck.logger.Log(constants.LogPutAppend, "Sending %v request for key=%v, value=%v, seqNum=%v", op, key, value, currentSeqNum)
+
+	// Keep trying until we get a successful response
+	for {
+		// Try the last known leader first
+		server := ck.lastKnownLeader
+
+		for i := 0; i < len(ck.servers); i++ {
+			reply := PutAppendReply{}
+
+			ck.logger.Log(constants.LogPutAppend, "Trying server %d for %v request seqNum=%v", server, op, currentSeqNum)
+
+			// Send the RPC to the server
+			ok := ck.servers[server].Call(PutAppendRPC, &args, &reply)
+
+			if ok && reply.Err == OK {
+				// Successfully processed request
+				ck.lastKnownLeader = server
+				ck.logger.Log(constants.LogPutAppend, "%v request successful for key=%v, value=%v, seqNum=%v", op, key, value, currentSeqNum)
+				return
+			}
+
+			// Move to the next server (cyclically)
+			server = (server + 1) % len(ck.servers)
+
+			// Wait a short period to avoid overloading the system
+			// This is especially important if the network is dropping packets
+			// Don't use too long a timeout as we want to quickly find the leader
+		}
+	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
