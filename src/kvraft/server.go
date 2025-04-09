@@ -37,6 +37,17 @@ type Op struct {
 	ClerkId int64
 	SeqNum  int64
 }
+
+// NotifyChannel is used to notify client of operation completion
+type NotifyChannel struct {
+	// Channel to notify waiting client handlers
+	ch chan OpResult
+
+	// Identifies the operation
+	clerkId int64
+	seqNum  int64
+}
+
 // OpResult contains the result of an operation
 type OpResult struct {
 	// Error code
