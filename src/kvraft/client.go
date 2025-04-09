@@ -15,6 +15,13 @@ const (
 	GetRPC       = "KVServer.Get"
 	PutAppendRPC = "KVServer.PutAppend"
 )
+/*
+For my sanity:
+
+Each k/v server has a 1-to-1 connection with an associated raft peer.
+One of these raft peer's and therefore, the associated k/v server is the
+leader.
+*/
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	logger  *Logger
