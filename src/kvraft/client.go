@@ -92,9 +92,53 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
+	// Increment sequence number for this request
+	ck.seqNum++
+	currentSeqNum := ck.seqNum
 
-	// You will have to modify this function.
-	return ""
+	args := GetArgs{
+		Key:     key,
+		ClerkId: ck.clerkId,
+		SeqNum:  currentSeqNum,
+	}
+
+	ck.logger.Log(constants.LogGet, "Sending Get request for key=%v, seqNum=%v", key, currentSeqNum)
+
+	// Keep trying until we get a successful response
+	for {
+		// Try the last known leader first
+		server := ck.lastKnownLeader
+
+		for i := 0; i < len(ck.servers); i++ {
+			reply := GetReply{}
+
+			ck.logger.Log(constants.LogGet, "Trying server %d for Get request seqNum=%v", server, currentSeqNum)
+
+			// Send the RPC to the server
+			ok := ck.servers[server].Call(GetRPC, &args, &reply)
+
+			if ok && reply.Err == OK {
+				// Successfully processed request
+				ck.lastKnownLeader = server
+				ck.logger.Log(constants.LogGet, "Get request successful for key=%v, seqNum=%v, value=%v", key, currentSeqNum, reply.Value)
+				return reply.Value
+			}
+
+			if ok && reply.Err == ErrNoKey {
+				// Key doesn't exist
+				ck.lastKnownLeader = server
+				ck.logger.Log(constants.LogGet, "Key not found for Get request key=%v, seqNum=%v", key, currentSeqNum)
+				return ""
+			}
+
+			// Move to the next server (cyclically)
+			server = (server + 1) % len(ck.servers)
+
+			// Wait a short period to avoid overloading the system
+			// This is especially important if the network is dropping packets
+			// Don't use too long a timeout as we want to quickly find the leader
+		}
+	}
 }
 
 // shared by Put and Append.
