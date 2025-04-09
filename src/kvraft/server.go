@@ -9,6 +9,14 @@ import (
 	"sync/atomic"
 )
 
+/*
+Represents the valid operation types on the K/V server.
+*/
+const (
+	GetOp uint8 = iota
+	PutOp
+	AppendOp
+)
 type Op struct {
 	// Your definitions here.
 	// Field names must start with capital letters,
