@@ -86,8 +86,82 @@ type RequestInfo struct {
 	SeqNum int64
 	Value  string
 }
+
+/*
+RPC handler for Get calls to this K/V Server.
+*/
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	kv.mu.Lock()
+
+	// Create operation to submit to Raft
+	op := Op{
+		Type:    GetOp,
+		Key:     args.Key,
+		Val:     "",
+		ClerkId: args.ClerkId,
+		SeqNum:  args.SeqNum,
+	}
+
+	// Submit operation to Raft log
+	index, term, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		kv.mu.Unlock()
+		return
+	}
+
+	kv.logger.Log(constants.LogHandleGet, "Starting Get request from clerkId=%v, seqNum=%v, key=%v, index=%v",
+		args.ClerkId, args.SeqNum, args.Key, index)
+
+	// Check if this request has already been processed (duplicate detection)
+	if info, exists := kv.dupTable[args.ClerkId]; exists && info.SeqNum == args.SeqNum {
+		// This exact request has been processed, return cached result
+		kv.logger.Log(constants.LogHandleGet, "Duplicate Get request detected from clerkId=%v, seqNum=%v", args.ClerkId, args.SeqNum)
+		reply.Err = OK
+		reply.Value = info.Value
+		kv.mu.Unlock()
+		return
+	}
+
+	// Create a notification channel for this operation
+	ch := make(chan OpResult, 1)
+	kv.notifyChs[index] = NotifyChannel{
+		ch:      ch,
+		clerkId: args.ClerkId,
+		seqNum:  args.SeqNum,
+	}
+	kv.mu.Unlock()
+
+	// Wait for operation to be applied (with timeout)
+	select {
+	case result := <-ch:
+		reply.Err = result.Err
+		reply.Value = result.Value
+	case <-time.After(1000 * time.Millisecond):
+		// If we time out, check if we're still the leader for the same term
+		kv.mu.Lock()
+		delete(kv.notifyChs, index)
+		kv.mu.Unlock()
+
+		currentTerm, isStillLeader := kv.rf.GetState()
+		if !isStillLeader || currentTerm != term {
+			reply.Err = ErrWrongLeader
+		} else {
+			// Check if the operation was actually applied
+			kv.mu.Lock()
+			if info, exists := kv.dupTable[args.ClerkId]; exists && info.SeqNum >= args.SeqNum {
+				reply.Err = OK
+				if info.SeqNum == args.SeqNum {
+					reply.Value = info.Value
+				} else {
+					reply.Value = ""
+				}
+			} else {
+				reply.Err = ErrWrongLeader
+			}
+			kv.mu.Unlock()
+		}
+	}
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
