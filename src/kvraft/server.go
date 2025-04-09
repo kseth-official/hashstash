@@ -37,6 +37,13 @@ type Op struct {
 	ClerkId int64
 	SeqNum  int64
 }
+// OpResult contains the result of an operation
+type OpResult struct {
+	// Error code
+	Err Err
+
+	// Value (for Get operations)
+	Value string
 }
 
 type KVServer struct {
