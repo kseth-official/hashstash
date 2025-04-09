@@ -164,8 +164,81 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	}
 }
 
+/*
+RPC handler for PutAppend calls to this K/V Server.
+*/
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	kv.mu.Lock()
+
+	// Determine operation type
+	opType := PutOp
+	if args.Op == "Append" {
+		opType = AppendOp
+	}
+
+	// Create operation to submit to Raft
+	op := Op{
+		Type:    opType,
+		Key:     args.Key,
+		Val:     args.Value,
+		ClerkId: args.ClerkId,
+		SeqNum:  args.SeqNum,
+	}
+
+	// Submit operation to Raft log
+	index, term, isLeader := kv.rf.Start(op)
+	if !isLeader {
+		reply.Err = ErrWrongLeader
+		kv.mu.Unlock()
+		return
+	}
+
+	kv.logger.Log(constants.LogHandlePutAppend, "Starting %v request from clerkId=%v, seqNum=%v, key=%v, value=%v, index=%v",
+		args.Op, args.ClerkId, args.SeqNum, args.Key, args.Value, index)
+
+	// Check if this request has already been processed (duplicate detection)
+	if info, exists := kv.dupTable[args.ClerkId]; exists && info.SeqNum == args.SeqNum {
+		// This exact request has been processed
+		kv.logger.Log(constants.LogHandlePutAppend, "Duplicate PutAppend request detected from clerkId=%v, seqNum=%v", args.ClerkId, args.SeqNum)
+		reply.Err = OK
+		kv.mu.Unlock()
+		return
+	}
+
+	// Create a notification channel for this operation
+	ch := make(chan OpResult, 1)
+	kv.notifyChs[index] = NotifyChannel{
+		ch:      ch,
+		clerkId: args.ClerkId,
+		seqNum:  args.SeqNum,
+	}
+	kv.mu.Unlock()
+
+	// Wait for operation to be applied (with timeout)
+	select {
+	case result := <-ch:
+		reply.Err = result.Err
+	case <-time.After(1000 * time.Millisecond):
+		// If we time out, check if we're still the leader for the same term
+		kv.mu.Lock()
+		delete(kv.notifyChs, index)
+		kv.mu.Unlock()
+
+		currentTerm, isStillLeader := kv.rf.GetState()
+		if !isStillLeader || currentTerm != term {
+			reply.Err = ErrWrongLeader
+		} else {
+			// Check if the operation was actually applied
+			kv.mu.Lock()
+			if info, exists := kv.dupTable[args.ClerkId]; exists && info.SeqNum >= args.SeqNum {
+				reply.Err = OK
+			} else {
+				reply.Err = ErrWrongLeader
+			}
+			kv.mu.Unlock()
+		}
+	}
+}
 }
 
 // the tester calls Kill() when a KVServer instance won't
