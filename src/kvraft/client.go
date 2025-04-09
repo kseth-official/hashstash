@@ -36,8 +36,21 @@ leader.
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	logger  *Logger
-	// You will have to modify this struct.
+	logger  *logger.Logger
+
+	// clerkId is a unique identifier for the Clerk instance, used to distinguish between different clients.
+	clerkId int64
+
+	// seqNum is a monotonically increasing sequence number used to uniquely identify client requests.
+	seqNum int64
+
+	/*
+		lastKnownLeader tracks the index of the most recent k/v server who's associated raft node was the leader.
+		allows directly sending to the last known leader server once a leader has been discovered
+		since the k/v server the rpc is sent to will respond with ErrWrongLeader if it is not associated with
+		the raft leader.
+	*/
+	lastKnownLeader int
 }
 
 func nrand() int64 {
