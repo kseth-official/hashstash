@@ -66,7 +66,17 @@ func nrand(upperLimit int64) int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	// You'll have to add code here.
+
+	// Assign a randomized clerkId from [0, ..., ClerkIdMax)
+	ck.clerkId = nrand(ClerkIdMax)
+	// Assign a randomized starting seqNum from [0, ..., SeqNumMax)
+	ck.seqNum = nrand(SeqNumMax)
+
+	// Start with a random server
+	ck.lastKnownLeader = int(nrand(int64(len(ck.servers))))
+
+	// Casting back to integer here for clerkId. Might need to deal with this detail later.
+	ck.logger = logger.NewLogger(int(ck.clerkId), false, "Clerk", constants.ClerkLoggingMap)
 
 	return ck
 }
