@@ -9,6 +9,15 @@ import (
 )
 
 const ClerkIdMax int64 = int64(1) << 62
+
+/*
+Choosing max seq number such that about 2^32 RPCs could still go
+go through in the worst case for 1 client. Probably needs more analysis
+here of what the optimal ceiling would be for least collisions and not
+overrunning the int64 size limit, but this should be okay for now.
+*/
+const SeqNumMax int64 = int64(1) << 32
+
 /*
 MAGIC STRINGS FOR RPC CALLS
 */
