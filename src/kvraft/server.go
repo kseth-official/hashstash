@@ -239,6 +239,90 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		}
 	}
 }
+
+/*
+Apply committed logs from Raft to the KV state machine.
+*/
+func (kv *KVServer) applyLogs() {
+	for !kv.killed() {
+		msg := <-kv.applyCh
+		kv.mu.Lock()
+
+		if !msg.CommandValid {
+			// Ignore other types of messages
+			kv.mu.Unlock()
+			continue
+		}
+
+		// Skip logs that have already been applied
+		if msg.CommandIndex <= kv.lastApplied {
+			kv.mu.Unlock()
+			continue
+		}
+		kv.lastApplied = msg.CommandIndex
+
+		// Convert the command to an Op
+		op, ok := msg.Command.(Op)
+		if !ok {
+			kv.logger.Log(constants.LogServer, "Failed to convert command to Op at index %v", msg.CommandIndex)
+			kv.mu.Unlock()
+			continue
+		}
+
+		result := OpResult{
+			Err:   OK,
+			Value: "",
+		}
+
+		// Check if this operation is a duplicate
+		isDuplicate := false
+		info, exists := kv.dupTable[op.ClerkId]
+		if exists && info.SeqNum == op.SeqNum {
+			isDuplicate = true
+			result.Value = info.Value
+		}
+
+		// Apply the operation if it's not a duplicate
+		if !isDuplicate {
+			switch op.Type {
+			case GetOp:
+				// Handle Get operation
+				if val, exists := kv.kvStore[op.Key]; exists {
+					result.Value = val
+				} else {
+					result.Err = ErrNoKey
+					result.Value = ""
+				}
+
+			case PutOp:
+				// Handle Put operation
+				kv.kvStore[op.Key] = op.Val
+
+			case AppendOp:
+				// Handle Append operation
+				if _, exists := kv.kvStore[op.Key]; !exists {
+					kv.kvStore[op.Key] = ""
+				}
+				kv.kvStore[op.Key] += op.Val
+			}
+
+			// Update duplicate table with the latest processed request for this client
+			kv.dupTable[op.ClerkId] = &RequestInfo{
+				SeqNum: op.SeqNum,
+				Value:  result.Value,
+			}
+		}
+
+		// Notify waiting client handler (if any)
+		if ch, exists := kv.notifyChs[msg.CommandIndex]; exists {
+			if ch.clerkId == op.ClerkId && ch.seqNum == op.SeqNum {
+				ch.ch <- result
+			}
+			delete(kv.notifyChs, msg.CommandIndex)
+		}
+
+		kv.mu.Unlock()
+	}
 }
 
 // the tester calls Kill() when a KVServer instance won't
