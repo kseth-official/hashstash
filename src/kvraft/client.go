@@ -53,8 +53,11 @@ type Clerk struct {
 	lastKnownLeader int
 }
 
-func nrand() int64 {
-	max := big.NewInt(int64(1) << 62)
+/*
+nrand generates a random int64 within the range [0, upperLimit). It uses cryptographic randomness for secure generation.
+*/
+func nrand(upperLimit int64) int64 {
+	max := big.NewInt(upperLimit)
 	bigx, _ := rand.Int(rand.Reader, max)
 	x := bigx.Int64()
 	return x
