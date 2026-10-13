@@ -338,6 +338,10 @@ func (kv *KVServer) Kill() {
 	kv.rf.Kill()
 }
 
+func (kv *KVServer) Raft() *raft.Raft {
+	return kv.rf
+}
+
 func (kv *KVServer) killed() bool {
 	z := atomic.LoadInt32(&kv.dead)
 	return z == 1
